@@ -92,7 +92,7 @@ func (x *GoSNMP) SendTrap(trap SnmpTrap) (result *SnmpPacket, err error) {
 type TrapListener struct {
 	sync.Mutex
 	OnNewTrap func(s *SnmpPacket, u *net.UDPAddr)
-	Params    *GoSNMP
+	Params    []*GoSNMP
 
 	// These unexported fields are for letting test cases
 	// know we are ready.
@@ -132,10 +132,13 @@ func (t *TrapListener) Close() {
 // Listen listens on the UDP address addr and calls the OnNewTrap
 // function specified in *TrapListener for every trap received.
 func (t *TrapListener) Listen(addr string) (err error) {
-	if t.Params == nil {
-		t.Params = Default
+	if len(t.Params) == 0 {
+		t.Params = []*GoSNMP{Default}
 	}
-	t.Params.validateParameters()
+
+	for _, params := range t.Params {
+		params.validateParameters()
+	}
 
 	if t.OnNewTrap == nil {
 		t.OnNewTrap = debugTrapHandler
@@ -169,14 +172,17 @@ func (t *TrapListener) Listen(addr string) (err error) {
 					// err most likely comes from reading from a closed connection
 					continue
 				}
-				t.Params.logPrintf("TrapListener: error in read %s\n", err)
+				// only try to log to the first Params' logger
+				t.Params[0].logPrintf("TrapListener: error in read %s\n", err)
 				continue
 			}
 
 			msg := buf[:rlen]
-			traps := t.Params.UnmarshalTrap(msg)
-			if traps != nil {
-				t.OnNewTrap(traps, remote)
+			for _, params := range t.Params {
+				traps := params.UnmarshalTrap(msg)
+				if traps != nil {
+					t.OnNewTrap(traps, remote)
+				}
 			}
 		}
 	}
