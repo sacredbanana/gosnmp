@@ -120,6 +120,11 @@ func (t *TrapListener) Listening() <-chan bool {
 	return t.listening
 }
 
+// GetConn returns the underlying *net.UDPConn
+func (t *TrapListener) GetConn() *net.UDPConn {
+	return t.conn
+}
+
 // Close terminates the listening on TrapListener socket
 func (t *TrapListener) Close() {
 	// Prevent concurrent calls to Close
