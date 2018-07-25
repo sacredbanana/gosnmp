@@ -182,6 +182,7 @@ func (t *TrapListener) Listen(addr string) (err error) {
 				traps := params.UnmarshalTrap(msg)
 				if traps != nil {
 					t.OnNewTrap(traps, remote)
+					break
 				}
 			}
 		}
