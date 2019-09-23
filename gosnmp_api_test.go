@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/soniah/gosnmp"
+	"gosnmp"
 )
 
 func TestAPIConfigTypes(t *testing.T) {
@@ -35,7 +35,7 @@ func TestAPIConfigTypes(t *testing.T) {
 	g.MaxRepetitions = 0
 	g.NonRepeaters = 0
 
-	var c net.Conn
+	var c net.PacketConn
 	c = g.Conn
 	_ = c
 }
