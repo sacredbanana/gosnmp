@@ -177,6 +177,7 @@ func (x *GoSNMP) sendOneRequest(packetOut *SnmpPacket,
 		if err != nil {
 			x.logPrintf("ERROR on ResolveUDPAddr: %s", err)
 			err = fmt.Errorf("Error on ResolveUDPAddr: %s", err.Error())
+			continue;
 		}
 		x.logPrintf("SENDING PACKET: %#+v", *packetOut)
 		_, err = x.Conn.WriteTo(outBuf, dst)
