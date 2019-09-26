@@ -177,13 +177,14 @@ func (x *GoSNMP) sendOneRequest(packetOut *SnmpPacket,
 		if err != nil {
 			x.logPrintf("ERROR on ResolveUDPAddr: %s", err)
 			err = fmt.Errorf("Error on ResolveUDPAddr: %s", err.Error())
-			continue;
+			continue
 		}
 		x.logPrintf("SENDING PACKET: %#+v", *packetOut)
 		_, err = x.Conn.WriteTo(outBuf, dst)
 		if err != nil {
 			x.logPrintf("ERROR on Conn.WriteTo: %s", err)
 			err = fmt.Errorf("Error on Conn.WriteTo: %s", err.Error())
+			continue
 		}
 
 		// all sends wait for the return packet, except for SNMPv2Trap
