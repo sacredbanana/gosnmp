@@ -168,6 +168,11 @@ func (t *TrapListener) Listening() <-chan bool {
 	return t.listening
 }
 
+// GetConn returns the underlying *net.UDPConn
+func (t *TrapListener) GetConn() *net.UDPConn {
+	return t.conn
+}
+
 // Close terminates the listening on TrapListener socket
 //
 // NOTE: the trap code is currently unreliable when working with snmpv3 - pull requests welcome
