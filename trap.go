@@ -114,7 +114,7 @@ type TrapListener struct {
 	sync.Mutex
 
 	// Params is a reference to the TrapListener's "parent" GoSNMP instance.
-	Params *GoSNMP
+	Params []*GoSNMP
 
 	// OnNewTrap handles incoming Trap and Inform PDUs.
 	OnNewTrap TrapHandlerFunc
@@ -200,7 +200,7 @@ func (t *TrapListener) SendUDP(packet *SnmpPacket, addr *net.UDPAddr) error {
 
 	// This isn't fatal, but should be logged.
 	if count != len(ob) {
-		t.Params.Logger.Printf("Failed to send all bytes of SnmpPacket!\n")
+		t.Params[0].Logger.Printf("Failed to send all bytes of SnmpPacket!\n")
 	}
 	return nil
 }
@@ -236,73 +236,75 @@ func (t *TrapListener) listenUDP(addr string) error {
 					// err most likely comes from reading from a closed connection
 					continue
 				}
-				t.Params.Logger.Printf("TrapListener: error in read %s\n", err)
+				t.Params[0].Logger.Printf("TrapListener: error in read %s\n", err)
 				continue
 			}
 
 			msg := buf[:rlen]
-			trap, err := t.Params.UnmarshalTrap(msg, false)
-			if err != nil {
-				t.Params.Logger.Printf("TrapListener: error in UnmarshalTrap %s\n", err)
-				continue
-			}
-			if trap.Version == Version3 && trap.SecurityModel == UserSecurityModel && t.Params.SecurityModel == UserSecurityModel {
-				securityParams, ok := t.Params.SecurityParameters.(*UsmSecurityParameters)
-				if !ok {
-					t.Params.Logger.Printf("TrapListener: Invalid SecurityParameters types")
-				}
-				packetSecurityParams, ok := trap.SecurityParameters.(*UsmSecurityParameters)
-				if !ok {
-					t.Params.Logger.Printf("TrapListener: Invalid SecurityParameters types")
-				}
-				snmpEngineID := securityParams.AuthoritativeEngineID
-				msgAuthoritativeEngineID := packetSecurityParams.AuthoritativeEngineID
-				if msgAuthoritativeEngineID != snmpEngineID {
-					if len(msgAuthoritativeEngineID) < 5 || len(msgAuthoritativeEngineID) > 32 {
-						// RFC3411 section 5. – SnmpEngineID definition.
-						// SnmpEngineID is an OCTET STRING which size should be between 5 and 32
-						// According to RFC3414 3.2.3b: stop processing and report
-						// the listener authoritative engine ID
-						atomic.AddUint32(&t.usmStatsUnknownEngineIDsCount, 1)
-						err := t.reportAuthoritativeEngineID(trap, snmpEngineID, remote)
-						if err != nil {
-							t.Params.Logger.Printf("TrapListener: %s\n", err)
-						}
-						continue
-					}
-					// RFC3414 3.2.3a: Continue processing
-				}
-			}
-			// Here we assume that t.OnNewTrap will not alter the contents
-			// of the PDU (per documentation, because Go does not have
-			// compile-time const checking).  We don't pass a copy because
-			// the SnmpPacket type is somewhat large, but we could without
-			// violating any implicit or explicit spec.
-			t.OnNewTrap(trap, remote)
-
-			// If it was an Inform request, we need to send a response.
-			if trap.PDUType == InformRequest { //nolint:whitespace
-
-				// Reuse the packet, since we're supposed to send it back
-				// with the exact same variables unless there's an error.
-				// Change the PDUType to the response, though.
-				trap.PDUType = GetResponse
-
-				// If the response can be sent, the error-status is
-				// supposed to be set to noError and the error-index set to
-				// zero.
-				trap.Error = NoError
-				trap.ErrorIndex = 0
-
-				// TODO: Check that the message marshalled is not too large
-				// for the originator to accept and if so, send a tooBig
-				// error PDU per RFC3416 section 4.2.7.  This maximum size,
-				// however, does not have a well-defined mechanism in the
-				// RFC other than using the path MTU (which is difficult to
-				// determine), so it's left to future implementations.
-				err := t.SendUDP(trap, remote)
+			for _, params := range t.Params {
+				trap, err := params.UnmarshalTrap(msg, false)
 				if err != nil {
-					t.Params.Logger.Printf("TrapListener: %s\n", err)
+					params.Logger.Printf("TrapListener: error in UnmarshalTrap %s\n", err)
+					continue
+				}
+				if trap.Version == Version3 && trap.SecurityModel == UserSecurityModel && params.SecurityModel == UserSecurityModel {
+					securityParams, ok := params.SecurityParameters.(*UsmSecurityParameters)
+					if !ok {
+						params.Logger.Printf("TrapListener: Invalid SecurityParameters types")
+					}
+					packetSecurityParams, ok := trap.SecurityParameters.(*UsmSecurityParameters)
+					if !ok {
+						params.Logger.Printf("TrapListener: Invalid SecurityParameters types")
+					}
+					snmpEngineID := securityParams.AuthoritativeEngineID
+					msgAuthoritativeEngineID := packetSecurityParams.AuthoritativeEngineID
+					if msgAuthoritativeEngineID != snmpEngineID {
+						if len(msgAuthoritativeEngineID) < 5 || len(msgAuthoritativeEngineID) > 32 {
+							// RFC3411 section 5. – SnmpEngineID definition.
+							// SnmpEngineID is an OCTET STRING which size should be between 5 and 32
+							// According to RFC3414 3.2.3b: stop processing and report
+							// the listener authoritative engine ID
+							atomic.AddUint32(&t.usmStatsUnknownEngineIDsCount, 1)
+							err := t.reportAuthoritativeEngineID(trap, snmpEngineID, remote)
+							if err != nil {
+								params.Logger.Printf("TrapListener: %s\n", err)
+							}
+							continue
+						}
+						// RFC3414 3.2.3a: Continue processing
+					}
+				}
+				// Here we assume that t.OnNewTrap will not alter the contents
+				// of the PDU (per documentation, because Go does not have
+				// compile-time const checking).  We don't pass a copy because
+				// the SnmpPacket type is somewhat large, but we could without
+				// violating any implicit or explicit spec.
+				t.OnNewTrap(trap, remote)
+
+				// If it was an Inform request, we need to send a response.
+				if trap.PDUType == InformRequest { //nolint:whitespace
+
+					// Reuse the packet, since we're supposed to send it back
+					// with the exact same variables unless there's an error.
+					// Change the PDUType to the response, though.
+					trap.PDUType = GetResponse
+
+					// If the response can be sent, the error-status is
+					// supposed to be set to noError and the error-index set to
+					// zero.
+					trap.Error = NoError
+					trap.ErrorIndex = 0
+
+					// TODO: Check that the message marshalled is not too large
+					// for the originator to accept and if so, send a tooBig
+					// error PDU per RFC3416 section 4.2.7.  This maximum size,
+					// however, does not have a well-defined mechanism in the
+					// RFC other than using the path MTU (which is difficult to
+					// determine), so it's left to future implementations.
+					err := t.SendUDP(trap, remote)
+					if err != nil {
+						params.Logger.Printf("TrapListener: %s\n", err)
+					}
 				}
 			}
 		}
@@ -335,19 +337,21 @@ func (t *TrapListener) handleTCPRequest(conn net.Conn) {
 	// Read the incoming connection into the buffer.
 	reqLen, err := conn.Read(buf)
 	if err != nil {
-		t.Params.Logger.Printf("TrapListener: error in read %s\n", err)
+		t.Params[0].Logger.Printf("TrapListener: error in read %s\n", err)
 		return
 	}
 
 	msg := buf[:reqLen]
-	traps, err := t.Params.UnmarshalTrap(msg, false)
-	if err != nil {
-		t.Params.Logger.Printf("TrapListener: error in read %s\n", err)
-		return
+	for _, params := range t.Params {
+		traps, err := params.UnmarshalTrap(msg, false)
+		if err != nil {
+			params.Logger.Printf("TrapListener: error in read %s\n", err)
+			return
+		}
+		// TODO: lying for backward compatibility reason - create UDP Address ... not nice
+		r, _ := net.ResolveUDPAddr("", conn.RemoteAddr().String())
+		t.OnNewTrap(traps, r)
 	}
-	// TODO: lying for backward compatibility reason - create UDP Address ... not nice
-	r, _ := net.ResolveUDPAddr("", conn.RemoteAddr().String())
-	t.OnNewTrap(traps, r)
 	// Close the connection when you're done with it.
 	conn.Close()
 }
@@ -393,15 +397,13 @@ func (t *TrapListener) listenTCP(addr string) error {
 //
 // NOTE: the trap code is currently unreliable when working with snmpv3 - pull requests welcome
 func (t *TrapListener) Listen(addr string) error {
-	if t.Params == nil {
-		t.Params = Default
+	if len(t.Params) == 0 {
+		t.Params = []*GoSNMP{Default}
 	}
 
-	// TODO TODO returning an error cause the following to hang/break
-	// TestSendTrapBasic
-	// TestSendTrapWithoutWaitingOnListen
-	// TestSendV1Trap
-	_ = t.Params.validateParameters()
+	for _, params := range t.Params {
+		params.validateParameters()
+	}
 
 	if t.OnNewTrap == nil {
 		t.OnNewTrap = t.debugTrapHandler
@@ -426,7 +428,7 @@ func (t *TrapListener) Listen(addr string) error {
 
 // Default trap handler
 func (t *TrapListener) debugTrapHandler(s *SnmpPacket, u *net.UDPAddr) {
-	t.Params.Logger.Printf("got trapdata from %+v: %+v\n", u, s)
+	t.Params[0].Logger.Printf("got trapdata from %+v: %+v\n", u, s)
 }
 
 // UnmarshalTrap unpacks the SNMP Trap.
