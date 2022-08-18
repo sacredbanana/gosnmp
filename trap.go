@@ -306,6 +306,7 @@ func (t *TrapListener) listenUDP(addr string) error {
 						params.Logger.Printf("TrapListener: %s\n", err)
 					}
 				}
+				break
 			}
 		}
 	}
