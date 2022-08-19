@@ -168,7 +168,7 @@ func TestSendTrapBasic(t *testing.T) {
 	defer tl.Close()
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version2c)
-	tl.Params = Default
+	tl.Params = []*GoSNMP{Default}
 
 	// listener goroutine
 	errch := make(chan error)
@@ -234,7 +234,7 @@ func TestSendInformBasic(t *testing.T) {
 	defer tl.Close()
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version2c)
-	tl.Params = Default
+	tl.Params = []*GoSNMP{Default}
 
 	// listener goroutine
 	errch := make(chan error)
@@ -314,7 +314,7 @@ func TestSendTrapWithoutWaitingOnListen(t *testing.T) {
 	defer tl.Close()
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version2c)
-	tl.Params = Default
+	tl.Params = []*GoSNMP{Default}
 
 	errch := make(chan error)
 	listening := make(chan bool)
@@ -393,7 +393,7 @@ func TestSendV1Trap(t *testing.T) {
 	defer tl.Close()
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version1)
-	tl.Params = Default
+	tl.Params = []*GoSNMP{Default}
 
 	// listener goroutine
 	errch := make(chan error)
@@ -469,11 +469,11 @@ func TestSendV3TrapNoAuthNoPriv(t *testing.T) {
 	}
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version3)
-	tl.Params = Default
-	tl.Params.Version = Version3
-	tl.Params.SecurityParameters = sp
-	tl.Params.SecurityModel = UserSecurityModel
-	tl.Params.MsgFlags = NoAuthNoPriv
+	tl.Params = []*GoSNMP{Default}
+	tl.Params[0].Version = Version3
+	tl.Params[0].SecurityParameters = sp
+	tl.Params[0].SecurityModel = UserSecurityModel
+	tl.Params[0].MsgFlags = NoAuthNoPriv
 
 	// listener goroutine
 	errch := make(chan error)
@@ -555,11 +555,11 @@ func TestSendV3TrapMD5AuthNoPriv(t *testing.T) {
 	}
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version3)
-	tl.Params = Default
-	tl.Params.Version = Version3
-	tl.Params.SecurityParameters = sp
-	tl.Params.SecurityModel = UserSecurityModel
-	tl.Params.MsgFlags = AuthNoPriv
+	tl.Params = []*GoSNMP{Default}
+	tl.Params[0].Version = Version3
+	tl.Params[0].SecurityParameters = sp
+	tl.Params[0].SecurityModel = UserSecurityModel
+	tl.Params[0].MsgFlags = AuthNoPriv
 
 	// listener goroutine
 	errch := make(chan error)
@@ -641,11 +641,11 @@ func TestSendV3TrapSHAAuthNoPriv(t *testing.T) {
 	}
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version3)
-	tl.Params = Default
-	tl.Params.Version = Version3
-	tl.Params.SecurityParameters = sp
-	tl.Params.SecurityModel = UserSecurityModel
-	tl.Params.MsgFlags = AuthNoPriv
+	tl.Params = []*GoSNMP{Default}
+	tl.Params[0].Version = Version3
+	tl.Params[0].SecurityParameters = sp
+	tl.Params[0].SecurityModel = UserSecurityModel
+	tl.Params[0].MsgFlags = AuthNoPriv
 
 	// listener goroutine
 	errch := make(chan error)
@@ -728,11 +728,11 @@ func TestSendV3TrapSHAAuthDESPriv(t *testing.T) {
 	}
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version3)
-	tl.Params = Default
-	tl.Params.Version = Version3
-	tl.Params.SecurityParameters = sp
-	tl.Params.SecurityModel = UserSecurityModel
-	tl.Params.MsgFlags = AuthPriv
+	tl.Params = []*GoSNMP{Default}
+	tl.Params[0].Version = Version3
+	tl.Params[0].SecurityParameters = sp
+	tl.Params[0].SecurityModel = UserSecurityModel
+	tl.Params[0].MsgFlags = AuthPriv
 
 	// listener goroutine
 	errch := make(chan error)
@@ -816,11 +816,11 @@ func TestSendV3TrapSHAAuthAESPriv(t *testing.T) {
 	}
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version3)
-	tl.Params = Default
-	tl.Params.Version = Version3
-	tl.Params.SecurityParameters = sp
-	tl.Params.SecurityModel = UserSecurityModel
-	tl.Params.MsgFlags = AuthPriv
+	tl.Params = []*GoSNMP{Default}
+	tl.Params[0].Version = Version3
+	tl.Params[0].SecurityParameters = sp
+	tl.Params[0].SecurityModel = UserSecurityModel
+	tl.Params[0].MsgFlags = AuthPriv
 
 	// listener goroutine
 	errch := make(chan error)
@@ -904,11 +904,11 @@ func TestSendV3TrapSHAAuthAES192Priv(t *testing.T) {
 	}
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version3)
-	tl.Params = Default
-	tl.Params.Version = Version3
-	tl.Params.SecurityParameters = sp
-	tl.Params.SecurityModel = UserSecurityModel
-	tl.Params.MsgFlags = AuthPriv
+	tl.Params = []*GoSNMP{Default}
+	tl.Params[0].Version = Version3
+	tl.Params[0].SecurityParameters = sp
+	tl.Params[0].SecurityModel = UserSecurityModel
+	tl.Params[0].MsgFlags = AuthPriv
 
 	// listener goroutine
 	errch := make(chan error)
@@ -991,11 +991,11 @@ func TestSendV3TrapSHAAuthAES192CPriv(t *testing.T) {
 	}
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version3)
-	tl.Params = Default
-	tl.Params.Version = Version3
-	tl.Params.SecurityParameters = sp
-	tl.Params.SecurityModel = UserSecurityModel
-	tl.Params.MsgFlags = AuthPriv
+	tl.Params = []*GoSNMP{Default}
+	tl.Params[0].Version = Version3
+	tl.Params[0].SecurityParameters = sp
+	tl.Params[0].SecurityModel = UserSecurityModel
+	tl.Params[0].MsgFlags = AuthPriv
 
 	// listener goroutine
 	errch := make(chan error)
@@ -1077,11 +1077,11 @@ func TestSendV3TrapSHAAuthAES256Priv(t *testing.T) {
 	}
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version3)
-	tl.Params = Default
-	tl.Params.Version = Version3
-	tl.Params.SecurityParameters = sp
-	tl.Params.SecurityModel = UserSecurityModel
-	tl.Params.MsgFlags = AuthPriv
+	tl.Params = []*GoSNMP{Default}
+	tl.Params[0].Version = Version3
+	tl.Params[0].SecurityParameters = sp
+	tl.Params[0].SecurityModel = UserSecurityModel
+	tl.Params[0].MsgFlags = AuthPriv
 
 	// listener goroutine
 	errch := make(chan error)
@@ -1164,11 +1164,11 @@ func TestSendV3TrapSHAAuthAES256CPriv(t *testing.T) {
 	}
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version3)
-	tl.Params = Default
-	tl.Params.Version = Version3
-	tl.Params.SecurityParameters = sp
-	tl.Params.SecurityModel = UserSecurityModel
-	tl.Params.MsgFlags = AuthPriv
+	tl.Params = []*GoSNMP{Default}
+	tl.Params[0].Version = Version3
+	tl.Params[0].SecurityParameters = sp
+	tl.Params[0].SecurityModel = UserSecurityModel
+	tl.Params[0].MsgFlags = AuthPriv
 
 	// listener goroutine
 	errch := make(chan error)
@@ -1249,11 +1249,11 @@ func TestSendV3EngineIdDiscovery(t *testing.T) {
 		AuthoritativeEngineTime:  1,
 		AuthoritativeEngineID:    authorativeEngineID,
 	}
-	tl.Params = Default
-	tl.Params.Version = Version3
-	tl.Params.SecurityParameters = sp
-	tl.Params.SecurityModel = UserSecurityModel
-	tl.Params.MsgFlags = AuthPriv
+	tl.Params = []*GoSNMP{Default}
+	tl.Params[0].Version = Version3
+	tl.Params[0].SecurityParameters = sp
+	tl.Params[0].SecurityModel = UserSecurityModel
+	tl.Params[0].MsgFlags = AuthPriv
 
 	// listener goroutine
 	errch := make(chan error)
