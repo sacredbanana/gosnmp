@@ -12,7 +12,6 @@ import (
 	"net"
 	"sync/atomic"
 	"time"
-	"strconv"
 )
 
 //
@@ -173,17 +172,9 @@ func (x *GoSNMP) sendOneRequest(packetOut *SnmpPacket,
 			break
 		}
 
-		dst, err := net.ResolveUDPAddr("udp", x.Target + ":" + strconv.Itoa(int(x.Port)))
-		if err != nil {
-			x.logPrintf("ERROR on ResolveUDPAddr: %s", err)
-			err = fmt.Errorf("Error on ResolveUDPAddr: %s", err.Error())
-			continue
-		}
 		x.logPrintf("SENDING PACKET: %#+v", *packetOut)
-		_, err = x.Conn.WriteTo(outBuf, dst)
+		_, err = x.Conn.Write(outBuf)
 		if err != nil {
-			x.logPrintf("ERROR on Conn.WriteTo: %s", err)
-			err = fmt.Errorf("Error on Conn.WriteTo: %s", err.Error())
 			continue
 		}
 
@@ -977,9 +968,7 @@ func (x *GoSNMP) unmarshalVBL(packet []byte, response *SnmpPacket) error {
 
 // receive response from network and read into a byte array
 func (x *GoSNMP) receive() ([]byte, error) {
-	// Note that we ignore the source address of the received packet
-	n, _, err := x.Conn.ReadFrom(x.rxBuf[:])
-
+	n, err := x.Conn.Read(x.rxBuf[:])
 	if err != nil {
 		return nil, fmt.Errorf("Error reading from UDP: %s", err.Error())
 	}

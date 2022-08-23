@@ -36,7 +36,7 @@ const (
 // GoSNMP represents GoSNMP library state
 type GoSNMP struct {
 	// Conn is net connection to use, typically established using GoSNMP.Connect()
-	Conn net.PacketConn
+	Conn net.Conn
 
 	// Target is an ipv4 address
 	Target string
@@ -223,11 +223,8 @@ func (x *GoSNMP) connect(network string) error {
 		return err
 	}
 
-	// listen to a random port.
-	// changed from Dial command so that gosnmp can accept responses
-	// originating from any IP
-	x.Conn, err = net.ListenPacket(network, ":0")
-
+	addr := net.JoinHostPort(x.Target, strconv.Itoa(int(x.Port)))
+	x.Conn, err = net.DialTimeout(network, addr, x.Timeout)
 	if err != nil {
 		return fmt.Errorf("Error establishing connection to host: %s\n", err.Error())
 	}

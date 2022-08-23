@@ -159,7 +159,7 @@ func TestSendTrapBasic(t *testing.T) {
 	defer tl.Close()
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version2c)
-	tl.Params = []*GoSNMP{Default}
+	tl.Params = Default
 
 	// listener goroutine
 	errch := make(chan error)
@@ -225,7 +225,7 @@ func TestSendTrapWithoutWaitingOnListen(t *testing.T) {
 	defer tl.Close()
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version2c)
-	tl.Params = []*GoSNMP{Default}
+	tl.Params = Default
 
 	errch := make(chan error)
 	listening := make(chan bool)
@@ -304,7 +304,7 @@ func TestSendV1Trap(t *testing.T) {
 	defer tl.Close()
 
 	tl.OnNewTrap = makeTestTrapHandler(t, done, Version1)
-	tl.Params = []*GoSNMP{Default}
+	tl.Params = Default
 
 	// listener goroutine
 	errch := make(chan error)
