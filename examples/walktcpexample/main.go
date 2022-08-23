@@ -1,4 +1,4 @@
-// Copyright 2012-2014 The GoSNMP Authors. All rights reserved.  Use of this
+// Copyright 2012 The GoSNMP Authors. All rights reserved.  Use of this
 // source code is governed by a BSD-style license that can be found in the
 // LICENSE file.
 
@@ -8,11 +8,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/soniah/gosnmp"
+	"github.com/gosnmp/gosnmp"
 )
 
 func main() {
@@ -40,8 +41,10 @@ func main() {
 	}
 
 	gosnmp.Default.Target = target
+	gosnmp.Default.Transport = "tcp"
 	gosnmp.Default.Community = community
 	gosnmp.Default.Timeout = time.Duration(10 * time.Second) // Timeout better suited to walking
+	gosnmp.Default.Logger = gosnmp.NewLogger(log.New(os.Stdout, "", 0))
 	err := gosnmp.Default.Connect()
 	if err != nil {
 		fmt.Printf("Connect err: %v\n", err)
@@ -49,6 +52,14 @@ func main() {
 	}
 	defer gosnmp.Default.Conn.Close()
 
+	err = gosnmp.Default.BulkWalk(oid, printValue)
+	if err != nil {
+		fmt.Printf("Walk Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// This may lead to the remote server closing the TCP connection
+	time.Sleep(15 * time.Second)
 	err = gosnmp.Default.BulkWalk(oid, printValue)
 	if err != nil {
 		fmt.Printf("Walk Error: %v\n", err)

@@ -1,4 +1,4 @@
-// Copyright 2012-2018 The GoSNMP Authors. All rights reserved.  Use of this
+// Copyright 2012 The GoSNMP Authors. All rights reserved.  Use of this
 // source code is governed by a BSD-style license that can be found in the
 // LICENSE file.
 
@@ -25,9 +25,18 @@ func (x *GoSNMP) walk(getRequestType PDUType, rootOid string, walkFn WalkFunc) e
 		maxReps = defaultMaxRepetitions
 	}
 
+	// AppOpt 'c: do not check returned OIDs are increasing'
+	checkIncreasing := true
+	if x.AppOpts != nil {
+		if _, ok := x.AppOpts["c"]; ok {
+			if getRequestType == GetBulkRequest || getRequestType == GetNextRequest {
+				checkIncreasing = false
+			}
+		}
+	}
+
 RequestLoop:
 	for {
-
 		requests++
 
 		var response *SnmpPacket
@@ -35,13 +44,13 @@ RequestLoop:
 
 		switch getRequestType {
 		case GetBulkRequest:
-			response, err = x.GetBulk([]string{oid}, uint8(x.NonRepeaters), uint8(maxReps))
+			response, err = x.GetBulk([]string{oid}, uint8(x.NonRepeaters), maxReps)
 		case GetNextRequest:
 			response, err = x.GetNext([]string{oid})
 		case GetRequest:
 			response, err = x.Get([]string{oid})
 		default:
-			response, err = nil, fmt.Errorf("Unsupported request type: %d", getRequestType)
+			response, err = nil, fmt.Errorf("unsupported request type: %d", getRequestType)
 		}
 
 		if err != nil {
@@ -51,34 +60,96 @@ RequestLoop:
 			break RequestLoop
 		}
 
-		if response.Error == NoSuchName {
+		switch response.Error {
+		case TooBig:
+			x.Logger.Print("Walk terminated with TooBig")
+			break RequestLoop
+		case NoSuchName:
 			x.Logger.Print("Walk terminated with NoSuchName")
 			break RequestLoop
+		case BadValue:
+			x.Logger.Print("Walk terminated with BadValue")
+			break RequestLoop
+		case ReadOnly:
+			x.Logger.Print("Walk terminated with ReadOnly")
+			break RequestLoop
+		case GenErr:
+			x.Logger.Print("Walk terminated with GenErr")
+			break RequestLoop
+		case NoAccess:
+			x.Logger.Print("Walk terminated with NoAccess")
+			break RequestLoop
+		case WrongType:
+			x.Logger.Print("Walk terminated with WrongType")
+			break RequestLoop
+		case WrongLength:
+			x.Logger.Print("Walk terminated with WrongLength")
+			break RequestLoop
+		case WrongEncoding:
+			x.Logger.Print("Walk terminated with WrongEncoding")
+			break RequestLoop
+		case WrongValue:
+			x.Logger.Print("Walk terminated with WrongValue")
+			break RequestLoop
+		case NoCreation:
+			x.Logger.Print("Walk terminated with NoCreation")
+			break RequestLoop
+		case InconsistentValue:
+			x.Logger.Print("Walk terminated with InconsistentValue")
+			break RequestLoop
+		case ResourceUnavailable:
+			x.Logger.Print("Walk terminated with ResourceUnavailable")
+			break RequestLoop
+		case CommitFailed:
+			x.Logger.Print("Walk terminated with CommitFailed")
+			break RequestLoop
+		case UndoFailed:
+			x.Logger.Print("Walk terminated with UndoFailed")
+			break RequestLoop
+		case AuthorizationError:
+			x.Logger.Print("Walk terminated with AuthorizationError")
+			break RequestLoop
+		case NotWritable:
+			x.Logger.Print("Walk terminated with NotWritable")
+			break RequestLoop
+		case InconsistentName:
+			x.Logger.Print("Walk terminated with InconsistentName")
+			break RequestLoop
+		case NoError:
+			x.Logger.Print("Walk completed with NoError")
 		}
 
-		for k, v := range response.Variables {
-			if v.Type == EndOfMibView || v.Type == NoSuchObject || v.Type == NoSuchInstance {
-				x.Logger.Printf("BulkWalk terminated with type 0x%x", v.Type)
+		for i, pdu := range response.Variables {
+			if pdu.Type == EndOfMibView || pdu.Type == NoSuchObject || pdu.Type == NoSuchInstance {
+				x.Logger.Printf("BulkWalk terminated with type 0x%x", pdu.Type)
 				break RequestLoop
 			}
-			if !strings.HasPrefix(v.Name, rootOid+".") {
+			if !strings.HasPrefix(pdu.Name, rootOid+".") {
 				// Not in the requested root range.
 				// if this is the first request, and the first variable in that request
 				// and this condition is triggered - the first result is out of range
 				// need to perform a regular get request
 				// this request has been too narrowly defined to be found with a getNext
 				// Issue #78 #93
-				if requests == 1 && k == 0 {
+				if requests == 1 && i == 0 {
 					getRequestType = GetRequest
 					continue RequestLoop
+				} else if pdu.Name == rootOid && pdu.Type != NoSuchInstance {
+					// Call walk function if the pdu instance is found
+					// considering that the rootOid is a leafOid
+					if err := walkFn(pdu); err != nil {
+						return err
+					}
 				}
 				break RequestLoop
 			}
-			if v.Name == oid {
-				return fmt.Errorf("OID not increasing: %s", v.Name)
+
+			if checkIncreasing && pdu.Name == oid {
+				return fmt.Errorf("OID not increasing: %s", pdu.Name)
 			}
+
 			// Report our pdu
-			if err := walkFn(v); err != nil {
+			if err := walkFn(pdu); err != nil {
 				return err
 			}
 		}

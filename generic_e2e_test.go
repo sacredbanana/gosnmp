@@ -1,4 +1,4 @@
-// Copyright 2012-2018 The GoSNMP Authors. All rights reserved.  Use of this
+// Copyright 2012 The GoSNMP Authors. All rights reserved.  Use of this
 // source code is governed by a BSD-style license that can be found in the
 // LICENSE file.
 
@@ -9,6 +9,7 @@
 // Ensure "gosnmp-test-host" is defined in your hosts file, and points to your
 // generic test system.
 
+//go:build all || end2end
 // +build all end2end
 
 package gosnmp
@@ -22,50 +23,77 @@ import (
 	"time"
 )
 
-func setupConnection(t *testing.T) {
-	envTarget := os.Getenv("GOSNMP_TARGET")
-	envPort := os.Getenv("GOSNMP_PORT")
+func getTarget(t *testing.T) (string, uint16) {
+	var envTarget string
+	var envPort string
+
+	// set this flag to true in v3_testing_credentials.go if you want to use the
+	// public SNMP demo service for tests
+	if isUsingSnmpLabs() {
+		envTarget = "demo.snmplabs.com"
+		envPort = "161"
+	} else {
+		envTarget = os.Getenv("GOSNMP_TARGET")
+		envPort = os.Getenv("GOSNMP_PORT")
+	}
 
 	if len(envTarget) <= 0 {
-		t.Error("environment variable not set: GOSNMP_TARGET")
+		t.Skip("environment variable not set: GOSNMP_TARGET")
 	}
-	Default.Target = envTarget
 
 	if len(envPort) <= 0 {
-		t.Error("environment variable not set: GOSNMP_PORT")
+		t.Skip("environment variable not set: GOSNMP_PORT")
 	}
 	port, _ := strconv.ParseUint(envPort, 10, 16)
-	Default.Port = uint16(port)
+
+	if port > 65535 {
+		t.Skipf("invalid port number %d", port)
+	}
+
+	return envTarget, uint16(port)
+}
+
+func setupConnection(t *testing.T) {
+	target, port := getTarget(t)
+
+	Default.Target = target
+	Default.Port = port
 
 	err := Default.Connect()
 	if err != nil {
-		if len(envTarget) > 0 {
-			t.Fatalf("Connection failed. Is snmpd reachable on %s:%s?\n(err: %v)",
-				envTarget, envPort, err)
+		if len(target) > 0 {
+			t.Fatalf("Connection failed. Is snmpd reachable on %s:%d?\n(err: %v)",
+				target, port, err)
+		}
+	}
+}
+
+func setupConnectionInstance(gs *GoSNMP, t *testing.T) {
+	target, port := getTarget(t)
+
+	gs.Target = target
+	gs.Port = port
+
+	err := gs.Connect()
+	if err != nil {
+		if len(target) > 0 {
+			t.Fatalf("Connection failed. Is snmpd reachable on %s:%d?\n(err: %v)",
+				target, port, err)
 		}
 	}
 }
 
 func setupConnectionIPv4(t *testing.T) {
-	envTarget := os.Getenv("GOSNMP_TARGET_IPV4")
-	envPort := os.Getenv("GOSNMP_PORT_IPV4")
+	target, port := getTarget(t)
 
-	if len(envTarget) <= 0 {
-		t.Error("environment variable not set: GOSNMP_TARGET_IPV4")
-	}
-	Default.Target = envTarget
-
-	if len(envPort) <= 0 {
-		t.Error("environment variable not set: GOSNMP_PORT_IPV4")
-	}
-	port, _ := strconv.ParseUint(envPort, 10, 16)
-	Default.Port = uint16(port)
+	Default.Target = target
+	Default.Port = port
 
 	err := Default.ConnectIPv4()
 	if err != nil {
-		if len(envTarget) > 0 {
-			t.Fatalf("Connection failed. Is snmpd reachable on %s:%s?\n(err: %v)",
-				envTarget, envPort, err)
+		if len(target) > 0 {
+			t.Fatalf("Connection failed. Is snmpd reachable on %s:%d?\n(err: %v)",
+				target, port, err)
 		}
 	}
 }
@@ -225,6 +253,20 @@ func TestGenericBulkWalk(t *testing.T) {
 	}
 }
 
+func TestV1BulkWalkError(t *testing.T) {
+	g := &GoSNMP{
+		Version: Version1,
+	}
+	setupConnectionInstance(g, t)
+
+	g.Conn.Close()
+
+	_, err := g.BulkWalkAll("")
+	if err == nil {
+		t.Fatalf("BulkWalkAll() should fail in SNMPv1 but returned nil")
+	}
+}
+
 // Standard exception/error tests
 
 func TestMaxOids(t *testing.T) {
@@ -277,6 +319,12 @@ func TestGenericFailureUnknownHost(t *testing.T) {
 }
 
 func TestGenericFailureConnectionTimeout(t *testing.T) {
+	t.Skip("local testing - skipping this slow one") // TODO test tag, or something
+	envTarget := os.Getenv("GOSNMP_TARGET")
+	if len(envTarget) <= 0 {
+		t.Skip("local testing - skipping this slow one")
+	}
+
 	Default.Target = "198.51.100.1" // Black hole
 	err := Default.Connect()
 	if err != nil {
@@ -311,7 +359,7 @@ func TestSnmpV3NoAuthNoPrivBasicGet(t *testing.T) {
 	Default.Version = Version3
 	Default.MsgFlags = NoAuthNoPriv
 	Default.SecurityModel = UserSecurityModel
-	Default.SecurityParameters = &UsmSecurityParameters{UserName: "noAuthNoPrivUser"}
+	Default.SecurityParameters = &UsmSecurityParameters{UserName: getUserName(t, NoAuth, NoPriv)}
 	setupConnection(t)
 	defer Default.Conn.Close()
 
@@ -322,20 +370,20 @@ func TestSnmpV3NoAuthNoPrivBasicGet(t *testing.T) {
 	if len(result.Variables) != 1 {
 		t.Fatalf("Expected result of size 1")
 	}
-	if result.Variables[0].Type != OctetString {
-		t.Fatalf("Expected sysDescr to be OctetString")
-	}
 	sysDescr := result.Variables[0].Value.([]byte)
 	if len(sysDescr) == 0 {
 		t.Fatalf("Got a zero length sysDescr")
 	}
 }
 
-func TestSnmpV3AuthNoPrivMD5Get(t *testing.T) {
+func TestSnmpV3AuthMD5NoPrivGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
 	Default.Version = Version3
 	Default.MsgFlags = AuthNoPriv
 	Default.SecurityModel = UserSecurityModel
-	Default.SecurityParameters = &UsmSecurityParameters{UserName: "authMD5OnlyUser", AuthenticationProtocol: MD5, AuthenticationPassphrase: "testingpass0123456789"}
+	Default.SecurityParameters = &UsmSecurityParameters{UserName: getUserName(t, MD5, NoPriv), AuthenticationProtocol: MD5, AuthenticationPassphrase: getAuthKey(t, MD5, NoPriv)}
 	setupConnection(t)
 	defer Default.Conn.Close()
 
@@ -355,95 +403,45 @@ func TestSnmpV3AuthNoPrivMD5Get(t *testing.T) {
 	}
 }
 
-func TestSnmpV3AuthNoPrivSHAGet(t *testing.T) {
+func TestSnmpV3AuthMD5PrivAES256CGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
+	Default.Version = Version3
+	Default.MsgFlags = AuthPriv
+	Default.SecurityModel = UserSecurityModel
+	Default.SecurityParameters = &UsmSecurityParameters{
+		UserName:               getUserName(t, MD5, AES256C),
+		AuthenticationProtocol: MD5, AuthenticationPassphrase: getAuthKey(t, MD5, AES256C),
+		PrivacyProtocol: AES256C, PrivacyPassphrase: getPrivKey(t, MD5, AES256C),
+	}
+	setupConnection(t)
+	defer Default.Conn.Close()
+
+	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
+	if err != nil {
+		t.Fatalf("Get() failed with error => %v", err)
+	}
+	if len(result.Variables) != 1 {
+		t.Fatalf("Expected result of size 1")
+	}
+	if result.Variables[0].Type != OctetString {
+		t.Fatalf("Expected sysDescr to be OctetString")
+	}
+	sysDescr := result.Variables[0].Value.([]byte)
+	if len(sysDescr) == 0 {
+		t.Fatalf("Got a zero length sysDescr")
+	}
+}
+
+func TestSnmpV3AuthSHANoPrivGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
 	Default.Version = Version3
 	Default.MsgFlags = AuthNoPriv
 	Default.SecurityModel = UserSecurityModel
-	Default.SecurityParameters = &UsmSecurityParameters{UserName: "authSHAOnlyUser", AuthenticationProtocol: SHA, AuthenticationPassphrase: "testingpass9876543210"}
-	setupConnection(t)
-	defer Default.Conn.Close()
-
-	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
-	if err != nil {
-		t.Fatalf("Get() failed with error => %v", err)
-	}
-	if len(result.Variables) != 1 {
-		t.Fatalf("Expected result of size 1")
-	}
-	if result.Variables[0].Type != OctetString {
-		t.Fatalf("Expected sysDescr to be OctetString")
-	}
-	sysDescr := result.Variables[0].Value.([]byte)
-	if len(sysDescr) == 0 {
-		t.Fatalf("Got a zero length sysDescr")
-	}
-}
-
-func TestSnmpV3AuthMD5PrivDESGet(t *testing.T) {
-	Default.Version = Version3
-	Default.MsgFlags = AuthPriv
-	Default.SecurityModel = UserSecurityModel
-	Default.SecurityParameters = &UsmSecurityParameters{UserName: "authMD5PrivDESUser",
-		AuthenticationProtocol:   MD5,
-		AuthenticationPassphrase: "testingpass9876543210",
-		PrivacyProtocol:          DES,
-		PrivacyPassphrase:        "testingpass9876543210"}
-	setupConnection(t)
-	defer Default.Conn.Close()
-
-	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
-	if err != nil {
-		t.Fatalf("Get() failed with error => %v", err)
-	}
-	if len(result.Variables) != 1 {
-		t.Fatalf("Expected result of size 1")
-	}
-	if result.Variables[0].Type != OctetString {
-		t.Fatalf("Expected sysDescr to be OctetString")
-	}
-	sysDescr := result.Variables[0].Value.([]byte)
-	if len(sysDescr) == 0 {
-		t.Fatalf("Got a zero length sysDescr")
-	}
-}
-
-func TestSnmpV3AuthSHAPrivDESGet(t *testing.T) {
-	Default.Version = Version3
-	Default.MsgFlags = AuthPriv
-	Default.SecurityModel = UserSecurityModel
-	Default.SecurityParameters = &UsmSecurityParameters{UserName: "authSHAPrivDESUser",
-		AuthenticationProtocol:   SHA,
-		AuthenticationPassphrase: "testingpassabc6543210",
-		PrivacyProtocol:          DES,
-		PrivacyPassphrase:        "testingpassabc6543210"}
-	setupConnection(t)
-	defer Default.Conn.Close()
-
-	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
-	if err != nil {
-		t.Fatalf("Get() failed with error => %v", err)
-	}
-	if len(result.Variables) != 1 {
-		t.Fatalf("Expected result of size 1")
-	}
-	if result.Variables[0].Type != OctetString {
-		t.Fatalf("Expected sysDescr to be OctetString")
-	}
-	sysDescr := result.Variables[0].Value.([]byte)
-	if len(sysDescr) == 0 {
-		t.Fatalf("Got a zero length sysDescr")
-	}
-}
-
-func TestSnmpV3AuthMD5PrivAESGet(t *testing.T) {
-	Default.Version = Version3
-	Default.MsgFlags = AuthPriv
-	Default.SecurityModel = UserSecurityModel
-	Default.SecurityParameters = &UsmSecurityParameters{UserName: "authMD5PrivAESUser",
-		AuthenticationProtocol:   MD5,
-		AuthenticationPassphrase: "AEStestingpass9876543210",
-		PrivacyProtocol:          AES,
-		PrivacyPassphrase:        "AEStestingpass9876543210"}
+	Default.SecurityParameters = &UsmSecurityParameters{UserName: getUserName(t, SHA, NoPriv), AuthenticationProtocol: SHA, AuthenticationPassphrase: getAuthKey(t, SHA, NoPriv)}
 	setupConnection(t)
 	defer Default.Conn.Close()
 
@@ -464,14 +462,348 @@ func TestSnmpV3AuthMD5PrivAESGet(t *testing.T) {
 }
 
 func TestSnmpV3AuthSHAPrivAESGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
 	Default.Version = Version3
 	Default.MsgFlags = AuthPriv
 	Default.SecurityModel = UserSecurityModel
-	Default.SecurityParameters = &UsmSecurityParameters{UserName: "authSHAPrivAESUser",
+	Default.SecurityParameters = &UsmSecurityParameters{
+		UserName:               getUserName(t, SHA, AES),
+		AuthenticationProtocol: SHA, AuthenticationPassphrase: getAuthKey(t, SHA, AES),
+		PrivacyProtocol: AES, PrivacyPassphrase: getPrivKey(t, SHA, AES),
+	}
+	setupConnection(t)
+	defer Default.Conn.Close()
+
+	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
+	if err != nil {
+		t.Fatalf("Get() failed with error => %v", err)
+	}
+	if len(result.Variables) != 1 {
+		t.Fatalf("Expected result of size 1")
+	}
+	if result.Variables[0].Type != OctetString {
+		t.Fatalf("Expected sysDescr to be OctetString")
+	}
+	sysDescr := result.Variables[0].Value.([]byte)
+	if len(sysDescr) == 0 {
+		t.Fatalf("Got a zero length sysDescr")
+	}
+}
+
+func TestSnmpV3AuthSHAPrivAES256CGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
+	Default.Version = Version3
+	Default.MsgFlags = AuthPriv
+	Default.SecurityModel = UserSecurityModel
+	Default.SecurityParameters = &UsmSecurityParameters{
+		UserName:               getUserName(t, SHA, AES256C),
+		AuthenticationProtocol: SHA, AuthenticationPassphrase: getAuthKey(t, SHA, AES256C),
+		PrivacyProtocol: AES256C, PrivacyPassphrase: getPrivKey(t, SHA, AES256C),
+	}
+	setupConnection(t)
+	defer Default.Conn.Close()
+
+	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
+	if err != nil {
+		t.Fatalf("Get() failed with error => %v", err)
+	}
+	if len(result.Variables) != 1 {
+		t.Fatalf("Expected result of size 1")
+	}
+	if result.Variables[0].Type != OctetString {
+		t.Fatalf("Expected sysDescr to be OctetString")
+	}
+	sysDescr := result.Variables[0].Value.([]byte)
+	if len(sysDescr) == 0 {
+		t.Fatalf("Got a zero length sysDescr")
+	}
+}
+
+func TestSnmpV3AuthSHA224NoPrivGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
+	Default.Version = Version3
+	Default.MsgFlags = AuthNoPriv
+	Default.SecurityModel = UserSecurityModel
+	Default.SecurityParameters = &UsmSecurityParameters{UserName: getUserName(t, SHA224, NoPriv), AuthenticationProtocol: SHA224, AuthenticationPassphrase: getAuthKey(t, SHA224, NoPriv)}
+	setupConnection(t)
+	defer Default.Conn.Close()
+
+	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
+	if err != nil {
+		t.Fatalf("Get() failed with error => %v", err)
+	}
+	if len(result.Variables) != 1 {
+		t.Fatalf("Expected result of size 1")
+	}
+	if result.Variables[0].Type != OctetString {
+		t.Fatalf("Expected sysDescr to be OctetString")
+	}
+	sysDescr := result.Variables[0].Value.([]byte)
+	if len(sysDescr) == 0 {
+		t.Fatalf("Got a zero length sysDescr")
+	}
+}
+
+func TestSnmpV3AuthSHA256NoPrivGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
+	Default.Version = Version3
+	Default.MsgFlags = AuthNoPriv
+	Default.SecurityModel = UserSecurityModel
+	Default.SecurityParameters = &UsmSecurityParameters{UserName: getUserName(t, SHA256, NoPriv), AuthenticationProtocol: SHA256, AuthenticationPassphrase: getAuthKey(t, SHA256, NoPriv)}
+	setupConnection(t)
+	defer Default.Conn.Close()
+
+	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
+	if err != nil {
+		t.Fatalf("Get() failed with error => %v", err)
+	}
+	if len(result.Variables) != 1 {
+		t.Fatalf("Expected result of size 1")
+	}
+	if result.Variables[0].Type != OctetString {
+		t.Fatalf("Expected sysDescr to be OctetString")
+	}
+	sysDescr := result.Variables[0].Value.([]byte)
+	if len(sysDescr) == 0 {
+		t.Fatalf("Got a zero length sysDescr")
+	}
+}
+
+func TestSnmpV3AuthSHA384NoPrivGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
+	Default.Version = Version3
+	Default.MsgFlags = AuthNoPriv
+	Default.SecurityModel = UserSecurityModel
+	Default.SecurityParameters = &UsmSecurityParameters{UserName: getUserName(t, SHA384, NoPriv), AuthenticationProtocol: SHA384, AuthenticationPassphrase: getAuthKey(t, SHA384, NoPriv)}
+	setupConnection(t)
+	defer Default.Conn.Close()
+
+	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
+	if err != nil {
+		t.Fatalf("Get() failed with error => %v", err)
+	}
+	if len(result.Variables) != 1 {
+		t.Fatalf("Expected result of size 1")
+	}
+	if result.Variables[0].Type != OctetString {
+		t.Fatalf("Expected sysDescr to be OctetString")
+	}
+	sysDescr := result.Variables[0].Value.([]byte)
+	if len(sysDescr) == 0 {
+		t.Fatalf("Got a zero length sysDescr")
+	}
+}
+
+func TestSnmpV3AuthSHA512NoPrivGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
+	Default.Version = Version3
+	Default.MsgFlags = AuthNoPriv
+	Default.SecurityModel = UserSecurityModel
+	Default.SecurityParameters = &UsmSecurityParameters{UserName: getUserName(t, SHA512, NoPriv), AuthenticationProtocol: SHA512, AuthenticationPassphrase: getAuthKey(t, SHA512, NoPriv)}
+	setupConnection(t)
+	defer Default.Conn.Close()
+
+	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
+	if err != nil {
+		t.Fatalf("Get() failed with error => %v", err)
+	}
+	if len(result.Variables) != 1 {
+		t.Fatalf("Expected result of size 1")
+	}
+	if result.Variables[0].Type != OctetString {
+		t.Fatalf("Expected sysDescr to be OctetString")
+	}
+	sysDescr := result.Variables[0].Value.([]byte)
+	if len(sysDescr) == 0 {
+		t.Fatalf("Got a zero length sysDescr")
+	}
+}
+
+func TestSnmpV3AuthSHA512PrivAES192Get(t *testing.T) {
+	t.Skip("AES-192 Blumenthal is currently known to have issues.")
+	Default.Version = Version3
+	Default.MsgFlags = AuthPriv
+	Default.SecurityModel = UserSecurityModel
+	Default.SecurityParameters = &UsmSecurityParameters{
+		UserName:               getUserName(t, SHA512, AES192),
+		AuthenticationProtocol: SHA512, AuthenticationPassphrase: getAuthKey(t, SHA512, AES192),
+		PrivacyProtocol: AES192, PrivacyPassphrase: getPrivKey(t, SHA512, AES192),
+	}
+
+	setupConnection(t)
+	defer Default.Conn.Close()
+
+	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
+	if err != nil {
+		t.Fatalf("Get() failed with error => %v", err)
+	}
+	if len(result.Variables) != 1 {
+		t.Fatalf("Expected result of size 1")
+	}
+	if result.Variables[0].Type != OctetString {
+		t.Fatalf("Expected sysDescr to be OctetString")
+	}
+	sysDescr := result.Variables[0].Value.([]byte)
+	if len(sysDescr) == 0 {
+		t.Fatalf("Got a zero length sysDescr")
+	}
+}
+
+func TestSnmpV3AuthSHA512PrivAES192CGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
+	Default.Version = Version3
+	Default.MsgFlags = AuthPriv
+	Default.SecurityModel = UserSecurityModel
+	Default.SecurityParameters = &UsmSecurityParameters{
+		UserName:               getUserName(t, SHA512, AES192C),
+		AuthenticationProtocol: SHA512, AuthenticationPassphrase: getAuthKey(t, SHA512, AES192C),
+		PrivacyProtocol: AES192C, PrivacyPassphrase: getPrivKey(t, SHA512, AES192C),
+	}
+
+	setupConnection(t)
+	defer Default.Conn.Close()
+
+	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
+	if err != nil {
+		t.Fatalf("Get() failed with error => %v", err)
+	}
+	if len(result.Variables) != 1 {
+		t.Fatalf("Expected result of size 1")
+	}
+	if result.Variables[0].Type != OctetString {
+		t.Fatalf("Expected sysDescr to be OctetString")
+	}
+	sysDescr := result.Variables[0].Value.([]byte)
+	if len(sysDescr) == 0 {
+		t.Fatalf("Got a zero length sysDescr")
+	}
+}
+
+// SHA 512 + AES256C (Reeder)
+func TestSnmpV3AuthSHA512PrivAES256CGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
+	Default.Version = Version3
+	Default.MsgFlags = AuthPriv
+	Default.SecurityModel = UserSecurityModel
+	Default.SecurityParameters = &UsmSecurityParameters{
+		UserName:               getUserName(t, SHA512, AES256C),
+		AuthenticationProtocol: SHA512, AuthenticationPassphrase: getAuthKey(t, SHA512, AES256C),
+		PrivacyProtocol: AES256C, PrivacyPassphrase: getPrivKey(t, SHA512, AES256C),
+	}
+	setupConnection(t)
+	defer Default.Conn.Close()
+
+	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
+	if err != nil {
+		t.Fatalf("Get() failed with error => %v", err)
+	}
+	if len(result.Variables) != 1 {
+		t.Fatalf("Expected result of size 1")
+	}
+	if result.Variables[0].Type != OctetString {
+		t.Fatalf("Expected sysDescr to be OctetString")
+	}
+	sysDescr := result.Variables[0].Value.([]byte)
+	if len(sysDescr) == 0 {
+		t.Fatalf("Got a zero length sysDescr")
+	}
+}
+
+func TestSnmpV3AuthMD5PrivDESGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
+	Default.Version = Version3
+	Default.MsgFlags = AuthPriv
+	Default.SecurityModel = UserSecurityModel
+
+	Default.SecurityParameters = &UsmSecurityParameters{UserName: getUserName(t, MD5, DES),
+		AuthenticationProtocol:   MD5,
+		AuthenticationPassphrase: getAuthKey(t, MD5, DES),
+		PrivacyProtocol:          DES,
+		PrivacyPassphrase:        getPrivKey(t, MD5, DES)}
+
+	setupConnection(t)
+	defer Default.Conn.Close()
+
+	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
+	if err != nil {
+		t.Fatalf("Get() failed with error => %v", err)
+	}
+	if len(result.Variables) != 1 {
+		t.Fatalf("Expected result of size 1")
+	}
+	if result.Variables[0].Type != OctetString {
+		t.Fatalf("Expected sysDescr to be OctetString")
+	}
+	sysDescr := result.Variables[0].Value.([]byte)
+	if len(sysDescr) == 0 {
+		t.Fatalf("Got a zero length sysDescr")
+	}
+}
+
+func TestSnmpV3AuthSHAPrivDESGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
+	Default.Version = Version3
+	Default.MsgFlags = AuthPriv
+	Default.SecurityModel = UserSecurityModel
+	Default.SecurityParameters = &UsmSecurityParameters{UserName: getUserName(t, SHA, DES),
 		AuthenticationProtocol:   SHA,
-		AuthenticationPassphrase: "AEStestingpassabc6543210",
+		AuthenticationPassphrase: getAuthKey(t, SHA, DES),
+		PrivacyProtocol:          DES,
+		PrivacyPassphrase:        getPrivKey(t, SHA, DES)}
+
+	setupConnection(t)
+	defer Default.Conn.Close()
+
+	result, err := Default.Get([]string{".1.3.6.1.2.1.1.1.0"}) // SNMP MIB-2 sysDescr
+	if err != nil {
+		t.Fatalf("Get() failed with error => %v", err)
+	}
+	if len(result.Variables) != 1 {
+		t.Fatalf("Expected result of size 1")
+	}
+	if result.Variables[0].Type != OctetString {
+		t.Fatalf("Expected sysDescr to be OctetString")
+	}
+	sysDescr := result.Variables[0].Value.([]byte)
+	if len(sysDescr) == 0 {
+		t.Fatalf("Got a zero length sysDescr")
+	}
+}
+
+func TestSnmpV3AuthMD5PrivAESGet(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
+	Default.Version = Version3
+	Default.MsgFlags = AuthPriv
+	Default.SecurityModel = UserSecurityModel
+
+	Default.SecurityParameters = &UsmSecurityParameters{UserName: getUserName(t, MD5, AES),
+		AuthenticationProtocol:   MD5,
+		AuthenticationPassphrase: getAuthKey(t, MD5, AES),
 		PrivacyProtocol:          AES,
-		PrivacyPassphrase:        "AEStestingpassabc6543210"}
+		PrivacyPassphrase:        getPrivKey(t, MD5, AES)}
+
 	setupConnection(t)
 	defer Default.Conn.Close()
 
@@ -492,12 +824,15 @@ func TestSnmpV3AuthSHAPrivAESGet(t *testing.T) {
 }
 
 func TestSnmpV3PrivEmptyPrivatePassword(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
 	Default.Version = Version3
 	Default.MsgFlags = AuthPriv
 	Default.SecurityModel = UserSecurityModel
-	Default.SecurityParameters = &UsmSecurityParameters{UserName: "authSHAPrivAESUser",
+	Default.SecurityParameters = &UsmSecurityParameters{UserName: getUserName(t, SHA, AES),
 		AuthenticationProtocol:   SHA,
-		AuthenticationPassphrase: "AEStestingpassabc6543210",
+		AuthenticationPassphrase: getAuthKey(t, SHA, AES),
 		PrivacyProtocol:          AES,
 		PrivacyPassphrase:        ""}
 
@@ -508,18 +843,20 @@ func TestSnmpV3PrivEmptyPrivatePassword(t *testing.T) {
 }
 
 func TestSnmpV3AuthNoPrivEmptyPrivatePassword(t *testing.T) {
+	if !isUsingSnmpLabs() {
+		t.Skip("This test is currently only working when using demo.snmplabs.com as test device.")
+	}
 	Default.Version = Version3
 	Default.MsgFlags = AuthNoPriv
 	Default.SecurityModel = UserSecurityModel
-	Default.SecurityParameters = &UsmSecurityParameters{UserName: "authSHAOnlyUser",
+	Default.SecurityParameters = &UsmSecurityParameters{UserName: getUserName(t, SHA, NoPriv),
 		AuthenticationProtocol:   SHA,
-		AuthenticationPassphrase: "testingpass9876543210",
+		AuthenticationPassphrase: getAuthKey(t, SHA, NoPriv),
 		PrivacyProtocol:          AES,
-		PrivacyPassphrase:        ""}
+		PrivacyPassphrase:        getPrivKey(t, SHA, NoPriv)}
 
 	err := Default.Connect()
 	if err == nil {
 		t.Fatalf("Expected validation error for empty PrivacyPassphrase")
 	}
-
 }

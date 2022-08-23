@@ -1,4 +1,4 @@
-// Copyright 2012-2018 The GoSNMP Authors. All rights reserved.  Use of this
+// Copyright 2012 The GoSNMP Authors. All rights reserved.  Use of this
 // source code is governed by a BSD-style license that can be found in the
 // LICENSE file.
 
@@ -11,6 +11,8 @@ package gosnmp
 import (
 	"time"
 )
+
+//go:generate mockgen --destination gosnmp_mock.go --package=gosnmp --source interface.go
 
 // Handler is a GoSNMP interface
 //
@@ -35,9 +37,7 @@ type Handler interface {
 	Get(oids []string) (result *SnmpPacket, err error)
 
 	// GetBulk sends an SNMP GETBULK request
-	//
-	// For maxRepetitions greater than 255, use BulkWalk() or BulkWalkAll()
-	GetBulk(oids []string, nonRepeaters uint8, maxRepetitions uint8) (result *SnmpPacket, err error)
+	GetBulk(oids []string, nonRepeaters uint8, maxRepetitions uint32) (result *SnmpPacket, err error)
 
 	// GetNext sends an SNMP GETNEXT request
 	GetNext(oids []string) (result *SnmpPacket, err error)
@@ -76,7 +76,7 @@ type Handler interface {
 	SendTrap(trap SnmpTrap) (result *SnmpPacket, err error)
 
 	// UnmarshalTrap unpacks the SNMP Trap.
-	UnmarshalTrap(trap []byte) (result *SnmpPacket)
+	UnmarshalTrap(trap []byte, useResponseSecurityParameters bool) (result *SnmpPacket, err error)
 
 	// Set sends an SNMP SET request
 	Set(pdus []SnmpPDU) (result *SnmpPacket, err error)
@@ -123,6 +123,12 @@ type Handler interface {
 	// SetRetries sets the Retries
 	SetRetries(retries int)
 
+	// GetExponentialTimeout gets the ExponentialTimeout
+	GetExponentialTimeout() bool
+
+	// SetExponentialTimeout sets the ExponentialTimeout
+	SetExponentialTimeout(value bool)
+
 	// Logger gets the Logger
 	Logger() Logger
 
@@ -136,10 +142,10 @@ type Handler interface {
 	SetMaxOids(maxOids int)
 
 	// MaxRepetitions gets the maxRepetitions
-	MaxRepetitions() uint8
+	MaxRepetitions() uint32
 
 	// SetMaxRepetitions sets the maxRepetitions
-	SetMaxRepetitions(maxRepetitions uint8)
+	SetMaxRepetitions(maxRepetitions uint32)
 
 	// NonRepeaters gets the nonRepeaters
 	NonRepeaters() int
@@ -246,6 +252,14 @@ func (x *snmpHandler) SetRetries(retries int) {
 	x.GoSNMP.Retries = retries
 }
 
+func (x *snmpHandler) GetExponentialTimeout() bool {
+	return x.GoSNMP.ExponentialTimeout
+}
+
+func (x *snmpHandler) SetExponentialTimeout(value bool) {
+	x.GoSNMP.ExponentialTimeout = value
+}
+
 func (x *snmpHandler) Logger() Logger {
 	return x.GoSNMP.Logger
 }
@@ -262,12 +276,13 @@ func (x *snmpHandler) SetMaxOids(maxOids int) {
 	x.GoSNMP.MaxOids = maxOids
 }
 
-func (x *snmpHandler) MaxRepetitions() uint8 {
-	return x.GoSNMP.MaxRepetitions
+func (x *snmpHandler) MaxRepetitions() uint32 {
+	return (x.GoSNMP.MaxRepetitions & 0x7FFFFFFF)
 }
 
-func (x *snmpHandler) SetMaxRepetitions(maxRepetitions uint8) {
-	x.GoSNMP.MaxRepetitions = maxRepetitions
+// SetMaxRepetitions wraps to 0 at max int32.
+func (x *snmpHandler) SetMaxRepetitions(maxRepetitions uint32) {
+	x.GoSNMP.MaxRepetitions = (maxRepetitions & 0x7FFFFFFF)
 }
 
 func (x *snmpHandler) NonRepeaters() int {

@@ -1,18 +1,25 @@
-// Copyright 2012-2018 The GoSNMP Authors. All rights reserved.  Use of this
+// Copyright 2012 The GoSNMP Authors. All rights reserved.  Use of this
 // source code is governed by a BSD-style license that can be found in the
 // LICENSE file.
 
+//go:build all || misc
 // +build all misc
 
 package gosnmp
 
 import (
 	"bytes"
+	"crypto"
+	_ "crypto/md5"
+	_ "crypto/sha1"
+	"errors"
+	"math"
+	"math/big"
 	"reflect"
 	"testing"
-)
 
-// Tests in alphabetical order of function being tested
+	"github.com/stretchr/testify/assert"
+)
 
 // -----------------------------------------------------------------------------
 
@@ -76,6 +83,44 @@ func TestPartition(t *testing.T) {
 
 // ---------------------------------------------------------------------
 
+var testsToBigInt = []struct {
+	in       interface{}
+	expected *big.Int
+}{
+	{int8(-42), big.NewInt(-42)},
+	{int16(42), big.NewInt(42)},
+	{int32(-42), big.NewInt(-42)},
+	{int64(42), big.NewInt(42)},
+
+	{uint8(42), big.NewInt(42)},
+	{uint16(42), big.NewInt(42)},
+	{uint32(42), big.NewInt(42)},
+	{uint64(42), big.NewInt(42)},
+
+	// edge case, max uint64
+	{uint64(math.MaxUint64), new(big.Int).SetUint64(math.MaxUint64)},
+
+	// string: valid number
+	{"-123456789", big.NewInt(-123456789)},
+
+	// string: invalid number
+	{"foo", new(big.Int)},
+
+	// unhandled type
+	{struct{}{}, new(big.Int)},
+}
+
+func TestToBigInt(t *testing.T) {
+	for i, test := range testsToBigInt {
+		result := ToBigInt(test.in)
+		if result.Cmp(test.expected) != 0 {
+			t.Errorf("#%d, %T: got %v expected %v", i, test.in, result, test.expected)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------
+
 var testsSnmpVersionString = []struct {
 	in  SnmpVersion
 	out string
@@ -106,7 +151,12 @@ var testSnmpV3MD5HMAC = []struct {
 
 func TestMD5HMAC(t *testing.T) {
 	for i, test := range testSnmpV3MD5HMAC {
-		result := md5HMAC(test.password, test.engineid)
+		cacheKey := make([]byte, 1+len(test.password))
+		cacheKey = append(cacheKey, 'h'+byte(MD5))
+		cacheKey = append(cacheKey, []byte(test.password)...)
+
+		result, err := hMAC(crypto.MD5, string(cacheKey), test.password, test.engineid)
+		assert.NoError(t, err)
 		if !bytes.Equal(result, test.outKey) {
 			t.Errorf("#%d, got %v expected %v", i, result, test.outKey)
 		}
@@ -123,7 +173,14 @@ var testSnmpV3SHAHMAC = []struct {
 
 func TestSHAHMAC(t *testing.T) {
 	for i, test := range testSnmpV3SHAHMAC {
-		result := shaHMAC(test.password, test.engineid)
+		cacheKey := make([]byte, 1+len(test.password))
+		cacheKey = append(cacheKey, 'h'+byte(SHA))
+		cacheKey = append(cacheKey, []byte(test.password)...)
+
+		result, err := hMAC(crypto.SHA1, string(cacheKey), test.password, test.engineid)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !bytes.Equal(result, test.outKey) {
 			t.Errorf("#%d, got %v expected %v", i, result, test.outKey)
 		}
@@ -152,3 +209,23 @@ func TestMarshalTimeticks(t *testing.T) {
 	}
 }
 */
+
+// parseBitString parses an ASN.1 bit string from the given byte slice and returns it.
+func parseBitString(bytes []byte) (ret BitStringValue, err error) {
+	if len(bytes) == 0 {
+		err = errors.New("zero length BIT STRING")
+		return
+	}
+	paddingBits := int(bytes[0])
+	if paddingBits > 7 ||
+		len(bytes) == 1 && paddingBits > 0 ||
+		bytes[len(bytes)-1]&((1<<bytes[0])-1) != 0 {
+		err = errors.New("invalid padding bits in BIT STRING")
+		return
+	}
+	ret.BitLength = (len(bytes)-1)*8 - paddingBits
+	ret.Bytes = bytes[1:]
+	return
+}
+
+// ---------------------------------------------------------------------
